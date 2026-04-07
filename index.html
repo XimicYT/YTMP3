@@ -5,87 +5,93 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Educational YT Downloader</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #1a1a2e;
-            color: #fff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .converter-box {
-            background: #16213e;
-            padding: 2.5rem;
-            border-radius: 12px;
-            box-shadow: 0 15px 30px rgba(0,0,0,0.5);
-            text-align: center;
-            width: 100%;
-            max-width: 400px;
-        }
+        /* Keeping our existing styles */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #fff; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .converter-box { background: #16213e; padding: 2.5rem; border-radius: 12px; box-shadow: 0 15px 30px rgba(0,0,0,0.5); text-align: center; width: 100%; max-width: 500px; margin-bottom: 20px; }
         h2 { margin-top: 0; color: #e94560; }
-        input {
-            width: 90%;
-            padding: 12px;
-            margin: 20px 0;
-            border: none;
-            border-radius: 6px;
-            font-size: 1rem;
-            background: #0f3460;
-            color: #fff;
-        }
-        input::placeholder { color: #888; }
-        button {
-            background: #e94560;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 1rem;
-            transition: background 0.3s;
-        }
+        input { width: 90%; padding: 12px; margin: 20px 0; border: none; border-radius: 6px; font-size: 1rem; background: #0f3460; color: #fff; }
+        button { background: #e94560; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.3s; margin: 5px; }
         button:hover { background: #d33c54; }
-        #status {
-            margin-top: 20px;
-            font-size: 0.95rem;
-            color: #aaa;
-        }
+        #status { margin-top: 20px; font-size: 0.95rem; color: #aaa; }
+        
+        /* New Styles for the Playlist Area */
+        #playlistArea { display: none; background: #16213e; padding: 1.5rem; border-radius: 12px; width: 100%; max-width: 500px; text-align: left; }
+        .track-item { display: flex; justify-content: space-between; align-items: center; background: #0f3460; margin-bottom: 10px; padding: 10px; border-radius: 6px; }
+        .track-item span { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+        .dl-btn { background: #28a745; padding: 6px 12px; font-size: 0.8rem; text-decoration: none; color: white; border-radius: 4px; }
+        .dl-btn:hover { background: #218838; }
     </style>
 </head>
 <body>
     <div class="converter-box">
         <h2>Self-Hosted Audio Engine</h2>
-        <p>Powered by YouTube.js</p>
+        <p>Supports Single Videos & Playlists</p>
         <input type="text" id="videoUrl" placeholder="Paste YouTube Link...">
-        <button id="convertBtn">Download Audio (M4A)</button>
+        <button id="processBtn">Process Link</button>
         <div id="status"></div>
     </div>
 
+    <div id="playlistArea">
+        <h3 id="plTitle" style="color: #e94560; margin-top: 0;"></h3>
+        <p id="plCount"></p>
+        <div id="trackList"></div>
+    </div>
+
     <script>
-        document.getElementById('convertBtn').addEventListener('click', () => {
+        document.getElementById('processBtn').addEventListener('click', async () => {
             const urlInput = document.getElementById('videoUrl').value.trim();
             const status = document.getElementById('status');
+            const playlistArea = document.getElementById('playlistArea');
+            const trackList = document.getElementById('trackList');
 
             if (!urlInput || !urlInput.includes('youtu')) {
-                alert("Please paste a valid YouTube link!");
-                return;
+                return alert("Please paste a valid YouTube link!");
             }
 
-            status.innerHTML = "Connecting to InnerTube...<br><small>Your download will start automatically.</small>";
+            // Logic Check: Is this a playlist or a single video?
+            if (urlInput.includes('list=')) {
+                // It's a playlist!
+                status.innerText = "Fetching playlist data...";
+                playlistArea.style.display = 'none';
+                
+                try {
+                    const response = await fetch(`/api/playlist?url=${encodeURIComponent(urlInput)}`);
+                    const data = await response.json();
 
-            // By setting the window location, the browser sends a GET request.
-            // When the server responds with 'Content-Disposition: attachment', 
-            // the browser knows to download it instead of leaving the page!
-            const downloadUrl = `/api/download?url=${encodeURIComponent(urlInput)}`;
-            window.location.href = downloadUrl;
-            
-            setTimeout(() => {
-                status.innerText = "Download triggered! You can paste another link.";
-                document.getElementById('videoUrl').value = '';
-            }, 3000);
+                    if (data.error) throw new Error(data.error);
+
+                    status.innerText = "Playlist loaded!";
+                    document.getElementById('plTitle').innerText = data.playlistTitle;
+                    document.getElementById('plCount').innerText = `${data.total} tracks found.`;
+                    
+                    // Build the UI list of tracks
+                    trackList.innerHTML = '';
+                    data.videos.forEach(video => {
+                        const trackDiv = document.createElement('div');
+                        trackDiv.className = 'track-item';
+                        
+                        // We construct the individual download link for each track
+                        const downloadLink = `/api/download?url=${encodeURIComponent('https://youtube.com/watch?v=' + video.id)}`;
+                        
+                        trackDiv.innerHTML = `
+                            <span>${video.title}</span>
+                            <a href="${downloadLink}" class="dl-btn" target="_blank">Download</a>
+                        `;
+                        trackList.appendChild(trackDiv);
+                    });
+
+                    playlistArea.style.display = 'block';
+
+                } catch (err) {
+                    status.innerText = "Error: " + err.message;
+                }
+
+            } else {
+                // It's a single video! Proceed with the normal direct download
+                status.innerHTML = "Connecting to InnerTube...<br><small>Your download will start automatically.</small>";
+                const downloadUrl = `/api/download?url=${encodeURIComponent(urlInput)}`;
+                window.location.href = downloadUrl;
+            }
         });
     </script>
 </body>
