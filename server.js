@@ -3,22 +3,20 @@ const cors = require('cors');
 const path = require('path');
 const { Innertube, UniversalCache } = require('youtubei.js');
 
-// 1. Initialize Express first!
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-// 2. Serve your index.html page
+// Serve the frontend
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// We keep a single instance of InnerTube in memory for efficiency
 let yt;
 
-// 3. ROUTE: Fetch Playlist Data
+// 1. PLAYLIST ROUTE: Keep using youtubei.js (It works perfectly for metadata!)
 app.get('/api/playlist', async (req, res) => {
     const playlistUrl = req.query.url;
 
@@ -29,7 +27,6 @@ app.get('/api/playlist', async (req, res) => {
             yt = await Innertube.create({ cache: new UniversalCache(false) });
         }
 
-        // Extract the playlist ID (from "list=...")
         const urlParams = new URLSearchParams(playlistUrl.split('?')[1]);
         const playlistId = urlParams.get('list');
 
@@ -37,16 +34,13 @@ app.get('/api/playlist', async (req, res) => {
             return res.status(400).json({ error: "Could not find a 'list=' parameter in the URL." });
         }
 
-        // Fetch the playlist info from InnerTube
         const playlist = await yt.getPlaylist(playlistId);
         
-        // Map over the items to extract just the IDs and Titles
         const videos = playlist.videos.map(video => ({
             id: video.id,
             title: video.title.text
         }));
 
-        // Send the clean array back to the frontend
         res.json({ 
             playlistTitle: playlist.info.title,
             total: videos.length,
@@ -58,7 +52,8 @@ app.get('/api/playlist', async (req, res) => {
         res.status(500).json({ error: "Could not fetch playlist. It might be private." });
     }
 });
-// 4. ROUTE: Download Single Audio File
+
+// 2. DOWNLOAD ROUTE: Pivot to the new Cobalt v10 API
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
 
@@ -67,54 +62,43 @@ app.get('/api/download', async (req, res) => {
     }
 
     try {
-        // Initialize InnerTube with session info (helps bypass bot detection)
-        if (!yt) {
-            yt = await Innertube.create({ 
-                cache: new UniversalCache(false),
-                generate_session_info: true 
-            });
-        }
-
-        // Extract the Video ID from the URL
-        const videoIdMatch = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
-        const videoId = videoIdMatch ? videoIdMatch[1] : null;
-
-        if (!videoId) {
-            return res.status(400).send("Could not extract a valid YouTube Video ID.");
-        }
-
-        // Get basic info so we can name the downloaded file correctly
-        const info = await yt.getBasicInfo(videoId);
-        const safeTitle = info.basic_info.title.replace(/[^\w\s-]/gi, '').trim();
-
-        // 🚨 THE FIX: Request the stream using a mobile client disguise
-        const stream = await yt.download(videoId, {
-            type: 'audio',
-            quality: 'best',
-            format: 'mp4',
-            client: 'ANDROID' // Pretend to be an Android phone!
+        // The new Cobalt API uses POST requests to the root URL
+        const response = await fetch('https://api.cobalt.tools/', {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: videoUrl,
+                downloadMode: 'audio', // Ask for audio only
+                audioFormat: 'mp3'     // Cobalt handles the FFmpeg conversion!
+            })
         });
 
-        // Tell the browser to expect a file download
-        res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.m4a"`);
-        res.setHeader('Content-Type', 'audio/mp4');
-
-        // Pipe the chunks of audio directly to the user
-        for await (const chunk of stream) {
-            res.write(chunk);
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Cobalt rejected the request (Status ${response.status}): ${errText}`);
         }
-        res.end();
+
+        const data = await response.json();
+
+        if (data.url) {
+            // THE MAGIC TRICK: 
+            // Instead of downloading it to our Render server first, we instantly redirect 
+            // the user's browser to the Cobalt download link. The browser sees the 
+            // file and downloads it directly!
+            res.redirect(data.url);
+        } else {
+            res.status(500).send("Cobalt returned an unexpected response: " + (data.text || JSON.stringify(data)));
+        }
 
     } catch (error) {
         console.error("Server error:", error);
-        if (!res.headersSent) {
-            // 🚨 THE FIX: Send the actual InnerTube error back to the browser so you can debug!
-            res.status(500).send(`YouTube Blocked the Request. Reason: ${error.message}`);
-        }
+        res.status(500).send(`Failed to process download. Reason: ${error.message}`);
     }
 });
 
-// 5. Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
