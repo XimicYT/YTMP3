@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Educational YT Downloader</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f7f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .converter-box {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+            width: 100%;
+            max-width: 400px;
+        }
+        input {
+            width: 90%;
+            padding: 12px;
+            margin: 20px 0;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        button {
+            background: #ff0000;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #cc0000;
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 0.95rem;
+            color: #555;
+        }
+        .download-btn {
+            display: inline-block;
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #28a745;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .download-btn:hover {
+            background: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="converter-box">
+        <h2>YT to MP3 Pro</h2>
+        <p>Render Educational Environment</p>
+        <input type="text" id="videoUrl" placeholder="Paste YouTube Link...">
+        <button id="convertBtn">Download MP3</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        document.getElementById('convertBtn').addEventListener('click', async () => {
+            const urlInput = document.getElementById('videoUrl').value;
+            const status = document.getElementById('status');
+
+            if (!urlInput) {
+                alert("Please paste a YouTube link!");
+                return;
+            }
+
+            // Note about Render's cold starts
+            status.innerHTML = "Processing via Render...<br><small>(May take up to 50s if the free server is waking up)</small>";
+
+            try {
+                // Fetching from our own Express backend!
+                const response = await fetch('/api/convert', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url: urlInput })
+                });
+
+                const data = await response.json();
+
+                if (data.url) {
+                    status.innerHTML = `
+                        <p style="color: green; font-weight: bold;">✔ Conversion Complete!</p>
+                        <a href="${data.url}" target="_blank" class="download-btn">
+                           Save MP3 File
+                        </a>`;
+                } else {
+                    status.innerText = "API Error: " + (data.text || data.error || "Check the console.");
+                    console.error(data);
+                }
+
+            } catch (err) {
+                console.error("Fetch error:", err);
+                status.innerText = "Connection failed. Please try again.";
+            }
+        });
+    </script>
+</body>
+</html>
