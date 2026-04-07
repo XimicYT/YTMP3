@@ -47,46 +47,43 @@ app.get('/api/playlist', async (req, res) => {
         res.status(500).json({ error: "Could not fetch playlist. It might be private." });
     }
 });
-// DOWNLOAD ROUTE: Bulletproof Failsafe Version
+// DOWNLOAD ROUTE: The "No-FFMPEG" Native Audio Fix
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send("No URL provided");
 
     try {
-        // 1. Safely extract the video ID
         const videoIdMatch = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
         const videoId = videoIdMatch ? videoIdMatch[1] : "download";
         
-        let safeTitle = `audio_${videoId}`; // Default name if YouTube blocks us
+        let safeTitle = `audio_${videoId}`; 
 
-        // 2. Try to get the real title, but DO NOT CRASH if it fails
         try {
             if (!yt) yt = await Innertube.create({ cache: new UniversalCache(false) });
             const info = await yt.getBasicInfo(videoId);
-            
-            // The ? ensures it doesn't crash if basic_info is missing
             if (info?.basic_info?.title) {
                 safeTitle = info.basic_info.title.replace(/[^\w\s-]/gi, '').trim();
             }
         } catch (titleError) {
             console.warn("YouTube blocked title fetch. Using fallback filename.");
-            // We ignore the error and keep going!
         }
 
-        // 3. Tell the browser a file is incoming
+        // We only send the headers once we are ready
         res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.m4a"`);
         res.setHeader('Content-Type', 'audio/mp4');
 
-        // 4. Force yt-dlp to stream the audio directly to the user
+        // THE FIX: Request Format 140 (Native YouTube M4A). 
+        // This requires ZERO processing and bypasses the missing ffmpeg crash.
         const subprocess = youtubedl.exec(videoUrl, {
-            format: 'bestaudio[ext=m4a]', 
+            format: '140', 
             output: '-' 
         });
 
         subprocess.stdout.pipe(res);
 
+        // If yt-dlp spits out an error, log it to the Render dashboard so we can read it
         subprocess.stderr.on('data', (data) => {
-            console.error(`yt-dlp logs: ${data}`);
+            console.error(`yt-dlp logs: ${data.toString()}`);
         });
 
     } catch (error) {
