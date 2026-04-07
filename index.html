@@ -7,7 +7,8 @@
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f4f7f6;
+            background: #1a1a2e;
+            color: #fff;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -15,24 +16,28 @@
             margin: 0;
         }
         .converter-box {
-            background: white;
+            background: #16213e;
             padding: 2.5rem;
             border-radius: 12px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.5);
             text-align: center;
             width: 100%;
             max-width: 400px;
         }
+        h2 { margin-top: 0; color: #e94560; }
         input {
             width: 90%;
             padding: 12px;
             margin: 20px 0;
-            border: 1px solid #ddd;
+            border: none;
             border-radius: 6px;
             font-size: 1rem;
+            background: #0f3460;
+            color: #fff;
         }
+        input::placeholder { color: #888; }
         button {
-            background: #ff0000;
+            background: #e94560;
             color: white;
             border: none;
             padding: 12px 24px;
@@ -42,78 +47,45 @@
             font-size: 1rem;
             transition: background 0.3s;
         }
-        button:hover {
-            background: #cc0000;
-        }
+        button:hover { background: #d33c54; }
         #status {
             margin-top: 20px;
             font-size: 0.95rem;
-            color: #555;
-        }
-        .download-btn {
-            display: inline-block;
-            margin-top: 10px;
-            padding: 10px 20px;
-            background: #28a745;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            font-weight: bold;
-        }
-        .download-btn:hover {
-            background: #218838;
+            color: #aaa;
         }
     </style>
 </head>
 <body>
     <div class="converter-box">
-        <h2>YT to MP3 Pro</h2>
-        <p>Render Educational Environment</p>
+        <h2>Self-Hosted Audio Engine</h2>
+        <p>Powered by YouTube.js</p>
         <input type="text" id="videoUrl" placeholder="Paste YouTube Link...">
-        <button id="convertBtn">Download MP3</button>
+        <button id="convertBtn">Download Audio (M4A)</button>
         <div id="status"></div>
     </div>
 
     <script>
-        document.getElementById('convertBtn').addEventListener('click', async () => {
-            const urlInput = document.getElementById('videoUrl').value;
+        document.getElementById('convertBtn').addEventListener('click', () => {
+            const urlInput = document.getElementById('videoUrl').value.trim();
             const status = document.getElementById('status');
 
-            if (!urlInput) {
-                alert("Please paste a YouTube link!");
+            if (!urlInput || !urlInput.includes('youtu')) {
+                alert("Please paste a valid YouTube link!");
                 return;
             }
 
-            // Note about Render's cold starts
-            status.innerHTML = "Processing via Render...<br><small>(May take up to 50s if the free server is waking up)</small>";
+            status.innerHTML = "Connecting to InnerTube...<br><small>Your download will start automatically.</small>";
 
-            try {
-                // Fetching from our own Express backend!
-                const response = await fetch('/api/convert', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ url: urlInput })
-                });
-
-                const data = await response.json();
-
-                if (data.url) {
-                    status.innerHTML = `
-                        <p style="color: green; font-weight: bold;">✔ Conversion Complete!</p>
-                        <a href="${data.url}" target="_blank" class="download-btn">
-                           Save MP3 File
-                        </a>`;
-                } else {
-                    status.innerText = "API Error: " + (data.text || data.error || "Check the console.");
-                    console.error(data);
-                }
-
-            } catch (err) {
-                console.error("Fetch error:", err);
-                status.innerText = "Connection failed. Please try again.";
-            }
+            // By setting the window location, the browser sends a GET request.
+            // When the server responds with 'Content-Disposition: attachment', 
+            // the browser knows to download it instead of leaving the page!
+            const downloadUrl = `/api/download?url=${encodeURIComponent(urlInput)}`;
+            window.location.href = downloadUrl;
+            
+            setTimeout(() => {
+                status.innerText = "Download triggered! You can paste another link.";
+                document.getElementById('videoUrl').value = '';
+            }, 3000);
         });
     </script>
 </body>
