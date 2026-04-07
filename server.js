@@ -47,29 +47,37 @@ app.get('/api/playlist', async (req, res) => {
         res.status(500).json({ error: "Could not fetch playlist. It might be private." });
     }
 });
-
-// DOWNLOAD ROUTE: Uses yt-dlp to bypass bot protection
+// DOWNLOAD ROUTE: Bulletproof Failsafe Version
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send("No URL provided");
 
     try {
-        // Grab the title using our InnerTube instance
-        if (!yt) yt = await Innertube.create({ cache: new UniversalCache(false) });
-        
+        // 1. Safely extract the video ID
         const videoIdMatch = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
-        const videoId = videoIdMatch ? videoIdMatch[1] : null;
+        const videoId = videoIdMatch ? videoIdMatch[1] : "download";
+        
+        let safeTitle = `audio_${videoId}`; // Default name if YouTube blocks us
 
-        if (!videoId) return res.status(400).send("Could not extract a valid YouTube Video ID.");
+        // 2. Try to get the real title, but DO NOT CRASH if it fails
+        try {
+            if (!yt) yt = await Innertube.create({ cache: new UniversalCache(false) });
+            const info = await yt.getBasicInfo(videoId);
+            
+            // The ? ensures it doesn't crash if basic_info is missing
+            if (info?.basic_info?.title) {
+                safeTitle = info.basic_info.title.replace(/[^\w\s-]/gi, '').trim();
+            }
+        } catch (titleError) {
+            console.warn("YouTube blocked title fetch. Using fallback filename.");
+            // We ignore the error and keep going!
+        }
 
-        const info = await yt.getBasicInfo(videoId);
-        const safeTitle = info.basic_info.title.replace(/[^\w\s-]/gi, '').trim();
-
-        // Tell the browser a file is incoming
+        // 3. Tell the browser a file is incoming
         res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.m4a"`);
         res.setHeader('Content-Type', 'audio/mp4');
 
-        // Execute yt-dlp and pipe the audio straight to the user
+        // 4. Force yt-dlp to stream the audio directly to the user
         const subprocess = youtubedl.exec(videoUrl, {
             format: 'bestaudio[ext=m4a]', 
             output: '-' 
@@ -88,7 +96,6 @@ app.get('/api/download', async (req, res) => {
         }
     }
 });
-
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
