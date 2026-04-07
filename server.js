@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { Innertube, UniversalCache } = require('youtubei.js');
+const youtubedl = require('youtube-dl-exec'); // The new bulletproof engine
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,23 +17,17 @@ app.get('/', (req, res) => {
 
 let yt;
 
-// 1. PLAYLIST ROUTE: Keep using youtubei.js (It works perfectly for metadata!)
+// PLAYLIST ROUTE: Grabs the titles cleanly
 app.get('/api/playlist', async (req, res) => {
     const playlistUrl = req.query.url;
-
     if (!playlistUrl) return res.status(400).json({ error: "No URL provided" });
 
     try {
-        if (!yt) {
-            yt = await Innertube.create({ cache: new UniversalCache(false) });
-        }
+        if (!yt) yt = await Innertube.create({ cache: new UniversalCache(false) });
 
         const urlParams = new URLSearchParams(playlistUrl.split('?')[1]);
         const playlistId = urlParams.get('list');
-
-        if (!playlistId) {
-            return res.status(400).json({ error: "Could not find a 'list=' parameter in the URL." });
-        }
+        if (!playlistId) return res.status(400).json({ error: "Could not find a 'list=' parameter in the URL." });
 
         const playlist = await yt.getPlaylist(playlistId);
         
@@ -52,67 +47,46 @@ app.get('/api/playlist', async (req, res) => {
         res.status(500).json({ error: "Could not fetch playlist. It might be private." });
     }
 });
-// 2. DOWNLOAD ROUTE: Pivot to Community Cobalt Instances
+
+// DOWNLOAD ROUTE: Uses yt-dlp to bypass bot protection
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
+    if (!videoUrl) return res.status(400).send("No URL provided");
 
-    if (!videoUrl) {
-        return res.status(400).send("No URL provided");
-    }
+    try {
+        // Grab the title using our InnerTube instance
+        if (!yt) yt = await Innertube.create({ cache: new UniversalCache(false) });
+        
+        const videoIdMatch = videoUrl.match(/(?:v=|\/)([0-9A-Za-z_-]{11}).*/);
+        const videoId = videoIdMatch ? videoIdMatch[1] : null;
 
-    // A list of community-hosted Cobalt v10 instances without JWT bot protection.
-    // If one goes down, the server automatically tries the next one!
-    // You can find more active instances at https://cobalt.directory/
-    const cobaltInstances = [
-        'https://api.cobalt.best',
-        'https://cobalt.kwiatekmiki.com',
-        'https://cobalt.silly.computer'
-    ];
+        if (!videoId) return res.status(400).send("Could not extract a valid YouTube Video ID.");
 
-    let lastError = "";
+        const info = await yt.getBasicInfo(videoId);
+        const safeTitle = info.basic_info.title.replace(/[^\w\s-]/gi, '').trim();
 
-    for (const instanceUrl of cobaltInstances) {
-        try {
-            console.log(`Attempting download via ${instanceUrl}...`);
-            
-            const response = await fetch(`${instanceUrl}/`, {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    url: videoUrl,
-                    downloadMode: 'audio', // Ask for audio only
-                    audioFormat: 'mp3'     // Convert to standard MP3
-                })
-            });
+        // Tell the browser a file is incoming
+        res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.m4a"`);
+        res.setHeader('Content-Type', 'audio/mp4');
 
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`Status ${response.status}: ${errText}`);
-            }
+        // Execute yt-dlp and pipe the audio straight to the user
+        const subprocess = youtubedl.exec(videoUrl, {
+            format: 'bestaudio[ext=m4a]', 
+            output: '-' 
+        });
 
-            const data = await response.json();
+        subprocess.stdout.pipe(res);
 
-            if (data.url) {
-                // THE MAGIC TRICK: We got the link!
-                // Instantly redirect the user's browser to the true download link.
-                return res.redirect(data.url);
-            } else {
-                throw new Error(`Unexpected response format: ${JSON.stringify(data)}`);
-            }
+        subprocess.stderr.on('data', (data) => {
+            console.error(`yt-dlp logs: ${data}`);
+        });
 
-        } catch (error) {
-            console.warn(`Instance ${instanceUrl} failed:`, error.message);
-            lastError = error.message; 
-            // The loop continues and tries the next URL in the array
+    } catch (error) {
+        console.error("Server error:", error);
+        if (!res.headersSent) {
+            res.status(500).send(`Failed to process download. Reason: ${error.message}`);
         }
     }
-
-    // If the loop finishes and EVERY server failed, tell the user:
-    console.error("All Cobalt instances failed.");
-    res.status(500).send(`Failed to process download after trying multiple backup servers. Last reason: ${lastError}`);
 });
 
 app.listen(PORT, () => {
