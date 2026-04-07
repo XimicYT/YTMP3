@@ -58,7 +58,6 @@ app.get('/api/playlist', async (req, res) => {
         res.status(500).json({ error: "Could not fetch playlist. It might be private." });
     }
 });
-
 // 4. ROUTE: Download Single Audio File
 app.get('/api/download', async (req, res) => {
     const videoUrl = req.query.url;
@@ -68,9 +67,12 @@ app.get('/api/download', async (req, res) => {
     }
 
     try {
-        // Initialize InnerTube if it hasn't been already
+        // Initialize InnerTube with session info (helps bypass bot detection)
         if (!yt) {
-            yt = await Innertube.create({ cache: new UniversalCache(false) });
+            yt = await Innertube.create({ 
+                cache: new UniversalCache(false),
+                generate_session_info: true 
+            });
         }
 
         // Extract the Video ID from the URL
@@ -85,18 +87,19 @@ app.get('/api/download', async (req, res) => {
         const info = await yt.getBasicInfo(videoId);
         const safeTitle = info.basic_info.title.replace(/[^\w\s-]/gi, '').trim();
 
-        // Request the audio stream from YouTube
+        // 🚨 THE FIX: Request the stream using a mobile client disguise
         const stream = await yt.download(videoId, {
             type: 'audio',
             quality: 'best',
-            format: 'mp4' 
+            format: 'mp4',
+            client: 'ANDROID' // Pretend to be an Android phone!
         });
 
         // Tell the browser to expect a file download
         res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.m4a"`);
         res.setHeader('Content-Type', 'audio/mp4');
 
-        // Pipe the chunks of audio from YouTube directly to the user
+        // Pipe the chunks of audio directly to the user
         for await (const chunk of stream) {
             res.write(chunk);
         }
@@ -105,7 +108,8 @@ app.get('/api/download', async (req, res) => {
     } catch (error) {
         console.error("Server error:", error);
         if (!res.headersSent) {
-            res.status(500).send("Failed to process the request. The video might be private or region-locked.");
+            // 🚨 THE FIX: Send the actual InnerTube error back to the browser so you can debug!
+            res.status(500).send(`YouTube Blocked the Request. Reason: ${error.message}`);
         }
     }
 });
